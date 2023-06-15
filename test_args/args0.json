@@ -24,5 +24,5 @@
   "num_heads": 2,
   "num_head_channels": -1,
   "noise_fn": "simplex",
-  "dataset": "pipe_fryum"
+  "dataset": "candle"
 }

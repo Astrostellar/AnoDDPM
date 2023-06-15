@@ -5,13 +5,20 @@ import time
 # matplotlib.use("TkAgg")
 import matplotlib.pyplot as plt
 import numpy as np
+import cv2
 from matplotlib import animation
+import matplotlib
 
 import dataset
 import evaluation
 from GaussianDiffusion import GaussianDiffusionModel, get_beta_schedule
 from helpers import *
 from UNet import UNetModel
+
+from sklearn.metrics import roc_auc_score, precision_recall_curve
+from skimage.segmentation import mark_boundaries
+from skimage import morphology
+from tqdm import tqdm
 
 
 def anomalous_validation_1():
@@ -152,6 +159,74 @@ def anomalous_validation_1():
                 f"remaining time: {hours}:{mins:02.0f}"
                 )
 
+def denormalization(x):
+    # mean = np.array([0.485, 0.456, 0.406])
+    # std = np.array([0.229, 0.224, 0.225])
+    # x = (((x.transpose(1, 2, 0) * std) + mean) * 255.).astype(np.uint8)
+    x = (x.transpose(1, 2, 0) * 255.).astype(np.uint8)
+    return x
+
+def plot_fig(test_img, recon_imgs, scores, gts, threshold, save_dir):
+    num = len(scores)
+    vmax = scores.max() * 255.
+    vmin = scores.min() * 255.
+    for i in range(num):
+        img = test_img[i]
+        img = denormalization(img)
+        recon_img = recon_imgs[i]
+        recon_img = denormalization(recon_img)
+        gt = gts[i].transpose(1, 2, 0).squeeze()
+        heat_map = scores[i] * 255
+        mask = scores[i]
+        mask[mask > threshold] = 1
+        mask[mask <= threshold] = 0
+        # kernel = morphology.disk(4)
+        # mask = morphology.opening(mask, kernel)
+        mask = (mask * 255).astype('uint8')
+        # vis_img = mark_boundaries(img, mask, color=(1, 0, 0), mode='thick')
+        fig_img, ax_img = plt.subplots(1, 5, figsize=(12, 3))
+        fig_img.subplots_adjust(right=0.9)
+        norm = matplotlib.colors.Normalize(vmin=vmin, vmax=vmax)
+        for ax_i in ax_img:
+            ax_i.axes.xaxis.set_visible(False)
+            ax_i.axes.yaxis.set_visible(False)
+        ax_img[0].imshow(img)
+        ax_img[0].title.set_text('Image')
+        ax_img[1].imshow(recon_img)
+        ax_img[1].title.set_text('Reconst')
+        ax_img[2].imshow(gt, cmap='gray')
+        ax_img[2].title.set_text('GroundTruth')
+        ax = ax_img[3].imshow(heat_map, cmap='jet', norm=norm)
+        ax_img[3].imshow(img, cmap='gray', interpolation='none')
+        ax_img[3].imshow(heat_map, cmap='jet', alpha=0.5, interpolation='none')
+        ax_img[3].title.set_text('Predicted heat map')
+        ax_img[4].imshow(mask, cmap='gray')
+        ax_img[4].title.set_text('Predicted mask')
+        # ax_img[5].imshow(vis_img)
+        # ax_img[5].title.set_text('Segmentation result')
+        left = 0.92
+        bottom = 0.15
+        width = 0.015
+        height = 1 - 2 * bottom
+        rect = [left, bottom, width, height]
+        cbar_ax = fig_img.add_axes(rect)
+        cb = plt.colorbar(ax, shrink=0.6, cax=cbar_ax, fraction=0.046)
+        cb.ax.tick_params(labelsize=8)
+        font = {
+            'family': 'serif',
+            'color': 'black',
+            'weight': 'normal',
+            'size': 8,
+        }
+        cb.set_label('Anomaly Score', fontdict=font)
+
+        fig_img.savefig(os.path.join(save_dir, '{}_png.png'.format(i)), dpi=100)
+        cv2.imwrite(os.path.join(save_dir, '{}_png_0.png'.format(i)), img.squeeze())
+        cv2.imwrite(os.path.join(save_dir, '{}_png_1.png'.format(i)), recon_img.squeeze())
+        cv2.imwrite(os.path.join(save_dir, '{}_png_2.png'.format(i)), gt*255)
+        cv2.imwrite(os.path.join(save_dir, '{}_png_3.png'.format(i)), mask)
+        plt.close()
+
 
 def anomalous_metric_calculation():
     """
@@ -159,10 +234,13 @@ def anomalous_metric_calculation():
     the heatmap of that & detection method (A&B) or C
     :return:
     """
+    visa_classes = ['candle', 'capsules', 'cashew', 'chewinggum', 'fryum', 'macaroni1', 
+                'macaroni2', 'pcb1', 'pcb2', 'pcb3', 'pcb4', 'pipe_fryum']
+    
     args, output = load_parameters(device)
     in_channels = 1
-    if args["dataset"].lower() == "leather":
-        in_channels = 3
+    # if args["dataset"].lower() in visa_classes:
+    #     in_channels = 3
 
     print(f"args{args['arg_num']}")
     unet = UNetModel(
@@ -182,10 +260,11 @@ def anomalous_metric_calculation():
     if args["dataset"].lower() == "carpet":
         d_set = dataset.DAGM("./DATASETS/CARPET/Class1", True)
         d_set_size = len(d_set)
-    elif args["dataset"].lower() == "leather":
+    elif args["dataset"].lower() in visa_classes:
+        class_name = args["dataset"].lower()
         d_set = dataset.MVTec(
-                "./DATASETS/leather", anomalous=True, img_size=args["img_size"],
-                rgb=True, include_good=False
+                f"../../dataset/visa/{class_name}", anomalous=True, img_size=args["img_size"],
+                rgb=False, include_good=True, random_crop=False
                 )
         d_set_size = len(d_set)
     else:
@@ -194,7 +273,7 @@ def anomalous_metric_calculation():
                 slice_selection="iterateKnown_restricted", resized=False, cleaned=True
                 )
         d_set_size = len(d_set) * 4
-    loader = dataset.init_dataset_loader(d_set, args)
+    loader = dataset.init_dataset_loader(d_set, args, shuffle=False)
     plt.rcParams['figure.dpi'] = 200
 
     dice_data = []
@@ -205,9 +284,18 @@ def anomalous_metric_calculation():
     FPR = []
     AUC_scores = []
 
-    start_time = time.time()
-    for i in range(d_set_size):
+    all_mask = []
+    all_mse = []
+    all_img = []
+    all_recon_imgs = []
 
+    all_img_score = []
+    all_gt_img_score = []
+
+    start_time = time.time()
+    for i in tqdm(range(d_set_size)):
+
+        '''
         if args["dataset"].lower() != "carpet" and args["dataset"].lower() != "leather":
             if i % 4 == 0:
                 new = next(loader)
@@ -216,19 +304,30 @@ def anomalous_metric_calculation():
             image = new["image"][i % 4, ...].to(device).reshape(1, 1, *args["img_size"])
             mask = new["mask"][i % 4, ...].to(device).reshape(1, 1, *args["img_size"])
         else:
-            new = next(loader)
-            image = new["image"].to(device)
-            mask = new["mask"].to(device)
+        '''
+        
+        new = next(loader)
+        image = new["image"].to(device)
+        mask = new["mask"].to(device)
 
         output = diff.forward_backward(
                 unet, image,
                 see_whole_sequence=None,
-                t_distance=200, denoise_fn=args["noise_fn"]
+                t_distance=150, denoise_fn=args["noise_fn"]
                 )
 
+        
         mse = (image - output).square()
-        fpr_simplex, tpr_simplex, _ = evaluation.ROC_AUC(mask.to(torch.uint8), mse)
+        all_mask.extend(mask.to(torch.uint8).cpu().numpy())
+        all_mse.extend(mse.cpu().numpy())
+        all_img.extend((image.cpu().numpy() + 1) / 2)
+        all_recon_imgs.extend((output.cpu().numpy() + 1) / 2)
+
+        all_gt_img_score.append(np.max(all_mask[-1]))
+        all_img_score.append(np.max(all_mse[-1]))
+        fpr_simplex, tpr_simplex, _ = evaluation.ROC_AUC(mask.to(torch.uint8).flatten(), mse.flatten())
         AUC_scores.append(evaluation.AUC_score(fpr_simplex, tpr_simplex))
+        print(AUC_scores[-1])
         mse = (mse > 0.5).float()
         # print(img.shape, output.shape, img_mask.shape, mse.shape)
         dice_data.append(
@@ -244,6 +343,7 @@ def anomalous_metric_calculation():
                         output.permute(0, 2, 3, 1).reshape(*args["img_size"], image.shape[1])
                         )
                 )
+        print(ssim_data[-1])
         precision.append(evaluation.precision(mask, mse).cpu().numpy())
         recall.append(evaluation.recall(mask, mse).cpu().numpy())
         IOU.append(evaluation.IoU(mask, mse))
@@ -273,6 +373,18 @@ def anomalous_metric_calculation():
             print(f"IOU: {np.mean(IOU[-4:])} +- {np.std(IOU[-4:])}")
             print("\n")
 
+    print(f'pixel auc: {roc_auc_score(np.array(all_mask).flatten(), np.array(all_mse).flatten())}')
+    print(f'image auc: {roc_auc_score(np.array(all_gt_img_score).flatten(), np.array(all_img_score).flatten())}')
+    precision, recall, thresholds = precision_recall_curve(np.array(all_mask).flatten(), np.array(all_mse).flatten())
+    a = 2 * precision * recall
+    b = precision + recall
+    f1 = np.divide(a, b, out=np.zeros_like(a), where=b != 0)
+    threshold = thresholds[np.argmax(f1)]
+    all_mse = np.array(all_mse).squeeze()
+    all_mse = (all_mse - all_mse.min()) / (all_mse.max() - all_mse.min())
+    os.makedirs(f'./diffusion-test/{class_name}', exist_ok=True)
+    plot_fig(np.array(all_img), np.array(all_recon_imgs), all_mse, np.array(all_mask), threshold, f'./diffusion-test/{class_name}')
+    
     print()
     print("Overall: ")
     print(f"Dice coefficient: {np.mean(dice_data)} +- {np.std(dice_data)}")
@@ -924,12 +1036,12 @@ if __name__ == "__main__":
     import sys
     from matplotlib import font_manager
 
-    font_path = "./times new roman.ttf"
-    font_manager.fontManager.addfont(font_path)
-    prop = font_manager.FontProperties(fname=font_path)
+    # font_path = "./times new roman.ttf"
+    # font_manager.fontManager.addfont(font_path)
+    # prop = font_manager.FontProperties(fname=font_path)
 
-    plt.rcParams['font.family'] = 'sans-serif'
-    plt.rcParams['font.sans-serif'] = prop.get_name()
+    # plt.rcParams['font.family'] = 'sans-serif'
+    # plt.rcParams['font.sans-serif'] = prop.get_name()
     DATASET_PATH = './DATASETS/CancerousDataset/EdinburghDataset/Anomalous-T1'
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 

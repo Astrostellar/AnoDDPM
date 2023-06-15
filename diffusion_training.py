@@ -3,6 +3,7 @@ import copy
 import sys
 import time
 from random import seed
+from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -84,7 +85,7 @@ def train(training_dataset_loader, testing_dataset_loader, args, resume):
     # iters = range(100 // args['Batch_Size']) if args["dataset"].lower() != "cifar" else range(150)
 
     # dataset loop
-    for epoch in tqdm_epoch:
+    for epoch in tqdm(tqdm_epoch):
         mean_loss = []
 
         for i in iters:
@@ -314,6 +315,9 @@ def main():
     if args["channels"] != "":
         in_channels = args["channels"]
 
+    visa_classes = ['candle', 'capsules', 'cashew', 'chewinggum', 'fryum', 'macaroni1', 
+                'macaroni2', 'pcb1', 'pcb2', 'pcb3', 'pcb4', 'pipe_fryum']
+    
     # if dataset is cifar, load different training & test set
     if args["dataset"].lower() == "cifar":
         training_dataset_loader_, testing_dataset_loader_ = dataset.load_CIFAR10(args, True), \
@@ -331,24 +335,25 @@ def main():
                 False
                 )
         testing_dataset_loader = dataset.init_dataset_loader(testing_dataset, args)
-    elif args["dataset"].lower() == "leather":
+    elif args["dataset"].lower() in visa_classes:
+        class_name = args["dataset"].lower()
         if in_channels == 3:
             training_dataset = dataset.MVTec(
-                    "./DATASETS/leather", anomalous=False, img_size=args["img_size"],
-                    rgb=True
+                    f"../../dataset/visa/{class_name}", anomalous=False, img_size=args["img_size"],
+                    rgb=True, random_crop=False
                     )
             testing_dataset = dataset.MVTec(
-                    "./DATASETS/leather", anomalous=True, img_size=args["img_size"],
-                    rgb=True, include_good=True
+                    f"../../dataset/visa/{class_name}", anomalous=True, img_size=args["img_size"],
+                    rgb=True, include_good=True, random_crop=False
                     )
         else:
             training_dataset = dataset.MVTec(
-                    "./DATASETS/leather", anomalous=False, img_size=args["img_size"],
-                    rgb=False
+                    f"../../dataset/visa/{class_name}", anomalous=False, img_size=args["img_size"],
+                    rgb=False, random_crop=False
                     )
             testing_dataset = dataset.MVTec(
-                    "./DATASETS/leather", anomalous=True, img_size=args["img_size"],
-                    rgb=False, include_good=True
+                    f"../../dataset/visa/{class_name}", anomalous=True, img_size=args["img_size"],
+                    rgb=False, include_good=True, random_crop=False
                     )
         training_dataset_loader = dataset.init_dataset_loader(training_dataset, args)
         testing_dataset_loader = dataset.init_dataset_loader(testing_dataset, args)
