@@ -502,8 +502,8 @@ class MVTec(Dataset):
             transforms_list.append(transforms.Grayscale(num_output_channels=channels))
         transforms_mask_list = [transforms.ToPILImage(), transforms.Grayscale(num_output_channels=channels)]
         if not random_crop:
-            transforms_list.append(transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR))
-            transforms_mask_list.append(transforms.Resize(img_size, transforms.InterpolationMode.BILINEAR))
+            transforms_list.append(transforms.Resize(img_size))
+            transforms_mask_list.append(transforms.Resize(img_size))
         transforms_list.append(transforms.ToTensor())
         transforms_mask_list.append(transforms.ToTensor())
         if rgb:
@@ -517,7 +517,8 @@ class MVTec(Dataset):
         self.rgb = rgb
         self.img_size = img_size
         self.random_crop = random_crop
-        self.classes = ["color", "cut", "fold", "glue", "poke"]
+        # self.classes = ["color", "cut", "fold", "glue", "poke"]
+        self.classes = ["bad", ]
         if include_good:
             self.classes.append("good")
         if anomalous:
@@ -528,7 +529,7 @@ class MVTec(Dataset):
             self.filenames = [f"{self.ROOT_DIR}/{i}" for i in os.listdir(self.ROOT_DIR)]
 
         for i in self.filenames[:]:
-            if not i.endswith(".png"):
+            if not i.endswith(".JPG"):
                 self.filenames.remove(i)
         self.filenames = sorted(self.filenames, key=lambda x: int(x[-7:-4]))
 
@@ -553,7 +554,7 @@ class MVTec(Dataset):
                 sample["mask"] = np.zeros((sample["image"].shape[0], sample["image"].shape[1], 1)).astype(np.uint8)
             else:
                 sample["mask"] = cv2.imread(
-                        os.path.join(self.ROOT_DIR, "ground_truth", file[-2], file[-1][:-4] + "_mask.png"), 0
+                        os.path.join(self.ROOT_DIR, "ground_truth", file[-2], file[-1][:-4] + ".png"), 0
                         )
         if self.random_crop:
             x1 = randint(0, sample["image"].shape[-2] - self.img_size[1])
